@@ -1,0 +1,5 @@
+*.pdf
+*.tex
+*.sty
+_pycache_/
+cache/

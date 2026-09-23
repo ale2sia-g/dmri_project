@@ -1,0 +1,11 @@
+iter 200/2000 | ELBO ≈ -3529.1
+iter 400/2000 | ELBO ≈ -3104.6
+iter 600/2000 | ELBO ≈ -2944.6
+iter 800/2000 | ELBO ≈ -2991.8
+iter 1000/2000 | ELBO ≈ -3060.8
+iter 1200/2000 | ELBO ≈ -2965.6
+iter 1400/2000 | ELBO ≈ -1745.9
+iter 1600/2000 | ELBO ≈ -1450.4
+iter 1800/2000 | ELBO ≈ -1372.0
+iter 2000/2000 | ELBO ≈ -1357.0
+Done. See results_vi.png
