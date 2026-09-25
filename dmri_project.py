@@ -694,9 +694,9 @@ def main():
     n_samples = 10000
 
     # Run Metropolis–Hastings and plot results
-    # S0_mh, evals_mh, evecs_mh = metropolis_hastings(force_recompute=False)
-    # burn_in = 0
-    # plot_results(S0_mh[burn_in:], evals_mh[burn_in:], evecs_mh[burn_in:, :, :], evec_principal, method="mh")
+    S0_mh, evals_mh, evecs_mh = metropolis_hastings(force_recompute=False)
+    burn_in = 0
+    plot_results(S0_mh[burn_in:], evals_mh[burn_in:], evecs_mh[burn_in:, :, :], evec_principal, method="mh")
 
     # Run Importance Sampling and plot results
     w_is, S0_is, evals_is, evecs_is = importance_sampling(n_samples, gamma_param=0.01, nu_param=25, force_recompute=False)
@@ -707,10 +707,10 @@ def main():
     S0_vi, evals_vi, evecs_vi = posterior_vi.rvs(size=n_samples)
     plot_results(S0_vi, evals_vi, evecs_vi, evec_principal, method="vi")
 
-    # # Run Laplace Approximation and plot results
-    # posterior_laplace = laplace_approximation(force_recompute=False)
-    # S0_laplace, evals_laplace, evecs_laplace = posterior_laplace.rvs(size=n_samples)
-    # plot_results(S0_laplace, evals_laplace, evecs_laplace, evec_principal, method="laplace")
+    # Run Laplace Approximation and plot results
+    posterior_laplace = laplace_approximation(force_recompute=False)
+    S0_laplace, evals_laplace, evecs_laplace = posterior_laplace.rvs(size=n_samples)
+    plot_results(S0_laplace, evals_laplace, evecs_laplace, evec_principal, method="laplace")
 
     print("Done.")
 
