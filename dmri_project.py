@@ -419,8 +419,8 @@ class frozen_prior:
     def logpdf(self, S0, evals):
         # log p(V) is constant (uniform on SO(3)), so we drop it
         log_p  = gamma.logpdf(S0, a=self.alpha_S, scale=self.theta_S)
-        log_p += np.sum(gamma.logpdf(evals, a=self.alpha_lam, scale=self.theta_lam))
-        return float(log_p)
+        log_p += np.sum(gamma.logpdf(evals, a=self.alpha_lam, scale=self.theta_lam), axis=1)
+        return log_p.astype(np.float64)
 
 
 class frozen_likelihood:
@@ -439,7 +439,6 @@ class frozen_likelihood:
 
         # Predicted signal S0 * exp(-x_i^T D x_i), shape (batch, N)
         S = S0[:, None] * np.exp(-np.einsum('...j, ijk, ...k->i...', q, D, q))
-
         # Sum of Gaussian log-densities over all N measurements
         log_p = np.sum(norm.logpdf(self.y[None, :], loc=S, scale=self.sigma), axis=1)
         return log_p
@@ -562,9 +561,37 @@ def importance_sampling(n_samples, gamma_param, nu_param):
     # Before starting, make sure the prior and likelihood are implemented.
     # Note: you may change, add, or remove input parameters depending on your design
     # (e.g. pass initialization values like those prepared in main()).
+    y, point_estimate, gtab = get_preprocessed_data(force_recompute=False)
+    S0_init, evals_init, evecs_init = point_estimate
 
-    raise NotImplementedError
+    D_init = compute_D(evals_init, evecs_init).squeeze()
 
+    prior = frozen_prior()
+    likelihood = frozen_likelihood(gtab, y)
+
+    # sampling with gamma and wishart distribution    
+    S0_samples = gamma.rvs(a=1/gamma_param**2, scale=gamma_param**2*S0_init, size=n_samples)
+    D_samples = wishart.rvs(df=nu_param, scale=D_init, size=n_samples)
+    
+    evals_samples, evecs_samples = np.linalg.eigh(D_samples)
+    prior_sample = prior.logpdf(S0_samples, evals_samples)
+    likelihood_sample = likelihood.logpdf(S0_samples, evecs_samples, evals_samples)
+    log_q_D = np.array([
+        wishart.logpdf(D,
+        df=nu_param,
+        scale=D_init)
+        for D in D_samples
+    ])
+
+    log_q = (
+        gamma.logpdf(S0_samples, a=1/gamma_param**2, scale=gamma_param**2*S0_init)
+        + log_q_D
+    )
+
+    importance_weights = prior_sample + likelihood_sample - log_q
+    #normalization
+    importance_weights = importance_weights / np.sum(importance_weights)
+    print("N_ESS: ", 1/np.sum(importance_weights**2))
     return importance_weights, S0_samples, evals_samples, evecs_samples
 
 
@@ -667,12 +694,12 @@ def main():
     n_samples = 10000
 
     # Run Metropolis–Hastings and plot results
-    S0_mh, evals_mh, evecs_mh = metropolis_hastings(force_recompute=False)
-    burn_in = 0
-    plot_results(S0_mh[burn_in:], evals_mh[burn_in:], evecs_mh[burn_in:, :, :], evec_principal, method="mh")
+    # S0_mh, evals_mh, evecs_mh = metropolis_hastings(force_recompute=False)
+    # burn_in = 0
+    # plot_results(S0_mh[burn_in:], evals_mh[burn_in:], evecs_mh[burn_in:, :, :], evec_principal, method="mh")
 
     # Run Importance Sampling and plot results
-    w_is, S0_is, evals_is, evecs_is = importance_sampling(force_recompute=False)
+    w_is, S0_is, evals_is, evecs_is = importance_sampling(n_samples, gamma_param=0.01, nu_param=25, force_recompute=False)
     plot_results(S0_is, evals_is, evecs_is, evec_principal, weights=w_is, method="is")
 
     # Run Variational Inference and plot results
@@ -680,10 +707,10 @@ def main():
     S0_vi, evals_vi, evecs_vi = posterior_vi.rvs(size=n_samples)
     plot_results(S0_vi, evals_vi, evecs_vi, evec_principal, method="vi")
 
-    # Run Laplace Approximation and plot results
-    posterior_laplace = laplace_approximation(force_recompute=False)
-    S0_laplace, evals_laplace, evecs_laplace = posterior_laplace.rvs(size=n_samples)
-    plot_results(S0_laplace, evals_laplace, evecs_laplace, evec_principal, method="laplace")
+    # # Run Laplace Approximation and plot results
+    # posterior_laplace = laplace_approximation(force_recompute=False)
+    # S0_laplace, evals_laplace, evecs_laplace = posterior_laplace.rvs(size=n_samples)
+    # plot_results(S0_laplace, evals_laplace, evecs_laplace, evec_principal, method="laplace")
 
     print("Done.")
 
