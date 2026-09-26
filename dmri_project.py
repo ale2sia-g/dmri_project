@@ -526,11 +526,18 @@ class mvn_reparameterized:
     # Placeholder for multivariate normal approximation.
     # Hint: you may want to add input parameters to these methods.
     
-    def __init__(self):
-        raise NotImplementedError
+    def __init__(self, mean, cov):
+        self.mean = mean
+        self.cov = cov
+        self.dim = mean.shape[0]
+        self.L = np.linalg.cholesky(cov)
     
     def rvs(self, size):
-        raise NotImplementedError
+        noise = np.random.randn(size, self.dim)
+        theta = self.mean + noise@self.L.T
+        S0_samples = np.exp(theta[:, 0])
+        D_samples = D_from_theta(theta[:, 1:])
+        evals_samples, evecs_samples = np.linalg.eigh(D_samples)
     
         return S0_samples, evals_samples, evecs_samples
 
@@ -666,10 +673,69 @@ def laplace_approximation():
     # Note: you may change, add, or remove input parameters depending on your design
     # (e.g. pass initialization values like those prepared in main()).
 
-    raise NotImplementedError
+    # transform parameters into uncontrained theta
+    y, point_estimate, gtab = get_preprocessed_data()
+    S0, evals, evecs = point_estimate
+    theta0 = np.log(S0)
+    D = compute_D(evals, evecs).squeeze()
+    theta_D = theta_from_D(D)
+    theta_init = np.concatenate([np.array([theta0]), theta_D])
 
-    return mvn_reparameterized(...)
+    prior = frozen_prior()
+    likelihood = frozen_likelihood(gtab, y)
 
+    # define the log posterior function to be maximized
+    def log_posterior(theta):
+        S0 = np.exp(theta[0])
+        D = D_from_theta(theta[1:])
+        evals, evecs = np.linalg.eigh(D)
+        log_prior = prior.logpdf(S0, evals[None, :])[0]
+        log_likelihood = likelihood.logpdf(S0, evecs, evals)
+        return log_prior + log_likelihood[0]
+
+    # Use L-BFGS-B to find the mode of the log posterior (theta_hat)
+    res = minimize(lambda theta: -log_posterior(theta), theta_init, method='L-BFGS-B')
+    # print(res.success, res.message, res.nit, res.fun)
+    # print(-log_posterior(res.x),-log_posterior(theta_init))
+    theta_hat = res.x
+
+    # #Compute Hessian at theta_hat with central difference approximation
+    def hessian(f, x0, eps=1e-5):
+        n = len(x0)
+        hessian = np.zeros((n, n))
+        f0 = f(x0)
+
+        for i in range(n):
+            for j in range(i,n):
+                if i == j:
+                    dx = np.zeros(n)
+                    # print(dx)
+                    dx[i] = eps
+                    # print(dx)
+                    f_plus = f(x0 + dx)
+                    f_minus = f(x0 - dx)
+                    hessian[i, j] = (f_plus - 2*f0 + f_minus) / (eps**2)
+                else:
+                    dxi = np.zeros(n)
+                    dxj = np.zeros(n)
+                    dxi[i] = eps
+                    dxj[j] = eps
+                    f_pp = f(x0 + dxi + dxj)
+                    f_pm = f(x0 + dxi - dxj)
+                    f_mp = f(x0 - dxi + dxj)
+                    f_mm = f(x0 - dxi - dxj)
+                    hessian[i, j] = (f_pp - f_pm - f_mp + f_mm) / (4*eps**2)
+                    hessian[j, i] = hessian[i, j]
+
+        return hessian
+
+    H = hessian(log_posterior, theta_hat)
+    # convert Hessian to covariance matrix for multivariate normal approximation
+    S = np.linalg.inv(-H)
+
+    # distr = multivariate_normal(mean=theta_hat, cov=S)
+
+    return mvn_reparameterized(mean=theta_hat, cov=S)
 
 
 """

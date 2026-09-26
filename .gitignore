@@ -3,3 +3,4 @@
 *.sty
 __pycache__/
 cache/
+venv/
