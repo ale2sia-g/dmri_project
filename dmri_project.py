@@ -550,16 +550,92 @@ Students: implement one method each (MH, IS, VI, or Laplace).
 Uses memoization to speed up repeated runs.
 """
 
+def eval_prior(prior_obj, S0, evals):
+    """Wraps the vectorized prior for a single MCMC step."""
+    return prior_obj.logpdf(np.array([S0]), evals[np.newaxis, :])[0]
+
+def eval_lik(lik_obj, S0, evecs, evals):
+    """Wraps the vectorized likelihood for a single MCMC step."""
+    return lik_obj.logpdf(np.array([S0]), evecs[np.newaxis, :, :], evals[np.newaxis, :])[0]
+
+
 @disk_memoize()
-def metropolis_hastings(n_samples, gamma_param, nu_param, plot_traces=False):
-    # Students: implement Metropolis-Hastings here.
-    # Before starting, make sure the prior and likelihood are implemented.
-    # Note: you may change, add, or remove input parameters depending on your design
-    # (e.g. pass initialization values like those prepared in main()).
+def metropolis_hastings(n_samples, S0_init, evals_init, evecs_init, prior, likelihood, gamma_param, nu_param):
+    # Initialize arrays to store the final decomposed samples
+    S0_samples = np.zeros(n_samples)
+    evals_samples = np.zeros((n_samples, 3))
+    evecs_samples = np.zeros((n_samples, 3, 3))
+   
+    curr_S0 = S0_init
+    curr_evals = evals_init
+    curr_evecs = evecs_init
+    curr_D = compute_D(curr_evals, curr_evecs).squeeze()
+   
+    # Evaluate initial posteriors 
+    curr_log_prior = eval_prior(prior, curr_S0, curr_evals)
+    curr_log_lik = eval_lik(likelihood, curr_S0, curr_evecs, curr_evals)
+    curr_log_post = curr_log_prior + curr_log_lik 
 
-    raise NotImplementedError
+    accepted = 0
+    shape_S0 = gamma_param**(-2)
+    
+    for i in range(n_samples):
+        if i % 1000 == 0:
+            print(f"MH sampling progress: {i}/{n_samples} samples")
+            
+        # Propose new state
+        scale_S0_fwd = curr_S0 * (gamma_param**2)
+        prop_S0 = gamma.rvs(a=shape_S0, scale=scale_S0_fwd)
+        
+        scale_D_fwd = curr_D / nu_param  
+        prop_D = wishart.rvs(df=nu_param, scale=scale_D_fwd)
 
+        prop_evals, prop_evecs = np.linalg.eigh(prop_D)
+        idx_prop = np.argsort(prop_evals)[::-1]
+        prop_evals = prop_evals[idx_prop]
+        prop_evecs = prop_evecs[:, idx_prop]
+
+        prop_log_prior = eval_prior(prior, prop_S0, prop_evals)
+        
+        if np.isinf(prop_log_prior):
+            S0_samples[i] = curr_S0
+            evals_samples[i] = curr_evals
+            evecs_samples[i] = curr_evecs
+            continue
+            
+        prop_log_lik = eval_lik(likelihood, prop_S0, prop_evecs, prop_evals)
+        prop_log_post = prop_log_lik + prop_log_prior
+        
+        # Compute proposal densities for forward and backward moves
+        log_q_fwd = (gamma.logpdf(prop_S0, a=shape_S0, scale=scale_S0_fwd) + 
+                     wishart.logpdf(prop_D, df=nu_param, scale=scale_D_fwd))
+
+        scale_S0_bwd = prop_S0 * (gamma_param**2)
+        scale_D_bwd = prop_D / nu_param 
+
+        log_q_bwd = (gamma.logpdf(curr_S0, a=shape_S0, scale=scale_S0_bwd) + 
+                     wishart.logpdf(curr_D, df=nu_param, scale=scale_D_bwd))
+        
+        log_alpha = (prop_log_post - curr_log_post) + (log_q_bwd - log_q_fwd)
+        
+
+       
+        if np.log(np.random.rand()) < log_alpha:
+            curr_S0 = prop_S0
+            curr_D = prop_D
+            curr_evals = prop_evals  
+            curr_evecs = prop_evecs
+            curr_log_post = prop_log_post
+            accepted += 1
+            
+      
+        S0_samples[i] = curr_S0
+        evals_samples[i] = curr_evals
+        evecs_samples[i] = curr_evecs
+
+    print(f"Acceptance rate: {accepted/n_samples:.3f}")
     return S0_samples, evals_samples, evecs_samples
+
 
 
 @disk_memoize()
@@ -752,6 +828,10 @@ def main():
     S0_init, evals_init, evecs_init = point_estimate
     D_init = compute_D(evals_init, evecs_init).squeeze()
 
+    frozen_prior_instance = frozen_prior()
+    
+    frozen_likelihood_instance = frozen_likelihood(gtab,y)
+
     # Find principal eigenvector from DTI estimate (for plotting)
     evec_principal = evecs_init[:, 0]
 
@@ -760,9 +840,10 @@ def main():
     n_samples = 10000
 
     # Run Metropolis–Hastings and plot results
-    S0_mh, evals_mh, evecs_mh = metropolis_hastings(force_recompute=False)
-    burn_in = 0
+    S0_mh, evals_mh, evecs_mh = metropolis_hastings(n_samples, S0_init, evals_init,evecs_init, frozen_prior_instance, frozen_likelihood_instance, gamma_param=0.005, nu_param=2000.0, force_recompute=False)
+    burn_in = 2000
     plot_results(S0_mh[burn_in:], evals_mh[burn_in:], evecs_mh[burn_in:, :, :], evec_principal, method="mh")
+    plot_mcmc_traces(S0_mh[burn_in:], evals_mh[burn_in:], n_samples-burn_in)
 
     # Run Importance Sampling and plot results
     w_is, S0_is, evals_is, evecs_is = importance_sampling(n_samples, gamma_param=0.01, nu_param=25, force_recompute=False)
@@ -779,6 +860,34 @@ def main():
     plot_results(S0_laplace, evals_laplace, evecs_laplace, evec_principal, method="laplace")
 
     print("Done.")
+
+def plot_mcmc_traces(S0_samples, evals_samples, n_samples):
+    iterations = range(n_samples)
+    
+   
+    fig, axes = plt.subplots(4, 1, figsize=(10, 8), sharex=True)
+    
+    # Trace for S0
+    axes[0].plot(iterations, S0_samples, color='purple', alpha=0.7)
+    axes[0].set_ylabel('S0')
+    axes[0].set_title('MCMC Trace Plot')
+    
+    # Trace for Principal Eigenvalue (Lambda 1)
+    axes[1].plot(iterations, evals_samples[:, 0], color='red', alpha=0.7)
+    axes[1].set_ylabel(r'$\lambda_1$')
+    
+    # Trace for Secondary Eigenvalue (Lambda 2)
+    axes[2].plot(iterations, evals_samples[:, 1], color='green', alpha=0.7)
+    axes[2].set_ylabel(r'$\lambda_2$')
+    
+    # Trace for Tertiary Eigenvalue (Lambda 3)
+    axes[3].plot(iterations, evals_samples[:, 2], color='blue', alpha=0.7)
+    axes[3].set_ylabel(r'$\lambda_3$')
+    axes[3].set_xlabel('Iteration')
+    
+    plt.tight_layout()
+    plt.savefig("mcmc_traces.png", dpi=300, bbox_inches='tight')
+    plt.show()
 
 
 def plot_results(S0, evals, evecs, evec_ref, weights=None, method=""):
