@@ -591,17 +591,9 @@ def metropolis_hastings(n_samples, S0_init, evals_init, evecs_init, prior, likel
         prop_D = wishart.rvs(df=nu_param, scale=scale_D_fwd)
 
         prop_evals, prop_evecs = np.linalg.eigh(prop_D)
-        idx_prop = np.argsort(prop_evals)[::-1]
-        prop_evals = prop_evals[idx_prop]
-        prop_evecs = prop_evecs[:, idx_prop]
-
+        
         prop_log_prior = eval_prior(prior, prop_S0, prop_evals)
         
-        if np.isinf(prop_log_prior):
-            S0_samples[i] = curr_S0
-            evals_samples[i] = curr_evals
-            evecs_samples[i] = curr_evecs
-            continue
             
         prop_log_lik = eval_lik(likelihood, prop_S0, prop_evecs, prop_evals)
         prop_log_post = prop_log_lik + prop_log_prior
@@ -834,14 +826,14 @@ def main():
 
     # Find principal eigenvector from DTI estimate (for plotting)
     evec_principal = evecs_init[:, 0]
-
+  
     # Set random seed and number of posterior samples
     np.random.seed(0)
     n_samples = 10000
 
     # Run Metropolis–Hastings and plot results
-    S0_mh, evals_mh, evecs_mh = metropolis_hastings(n_samples, S0_init, evals_init,evecs_init, frozen_prior_instance, frozen_likelihood_instance, gamma_param=0.005, nu_param=2000.0, force_recompute=False)
-    burn_in = 2000
+    S0_mh, evals_mh, evecs_mh = metropolis_hastings(n_samples, S0_init, evals_init[::-1],evecs_init[:, ::-1], frozen_prior_instance, frozen_likelihood_instance, gamma_param=0.005, nu_param=2000.0, force_recompute=True)
+    burn_in = 1000
     plot_results(S0_mh[burn_in:], evals_mh[burn_in:], evecs_mh[burn_in:, :, :], evec_principal, method="mh")
     plot_mcmc_traces(S0_mh[burn_in:], evals_mh[burn_in:], n_samples-burn_in)
 
