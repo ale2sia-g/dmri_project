@@ -717,7 +717,7 @@ def variational_inference(max_iters=2000, K=10, learning_rate=1e-2):
         f_vals = log_lik + log_prior - log_q  # (K,)
 
         # Score functions nabla_theta log q(z^k)
-        scores = np.array([q.score(S0_s[k], D_s[k]) for k in range(K)])  # (K, 9)
+        scores = np.array([q.score(S0_s[k], D_s[k] / q.df.item()) for k in range(K)])
 
         # REINFORCE leave-one-out gradient estimator
         baselines = (np.sum(f_vals) - f_vals) / (K - 1)
@@ -842,7 +842,7 @@ def main():
     plot_results(S0_is, evals_is, evecs_is, evec_principal, weights=w_is, method="is")
 
     # Run Variational Inference and plot results
-    posterior_vi = variational_inference(force_recompute=False)
+    posterior_vi = variational_inference(force_recompute=True)
     S0_vi, evals_vi, evecs_vi = posterior_vi.rvs(size=n_samples)
     plot_results(S0_vi, evals_vi, evecs_vi, evec_principal, method="vi")
 
