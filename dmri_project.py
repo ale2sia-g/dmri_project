@@ -671,7 +671,7 @@ def importance_sampling(n_samples, gamma_param, nu_param):
 
 
 @disk_memoize()
-def variational_inference(max_iters=2000, K=10, learning_rate=1e-2):
+def variational_inference(max_iters=20000, K=50, learning_rate=5e-4):
 
     y, point_estimate, gtab = get_preprocessed_data()
     S0_init, evals_init, evecs_init = point_estimate
