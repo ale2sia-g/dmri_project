@@ -529,14 +529,12 @@ class mvn_reparameterized:
     def __init__(self, mean, cov):
         self.mean = mean
         self.cov = cov
-        self.dim = mean.shape[0]
-        self.L = np.linalg.cholesky(cov)
     
     def rvs(self, size):
-        noise = np.random.randn(size, self.dim)
-        theta = self.mean + noise@self.L.T
-        S0_samples = np.exp(theta[:, 0])
-        D_samples = D_from_theta(theta[:, 1:])
+        # Sample from multivariate normal using reparameterization trick
+        theta_samples = multivariate_normal.rvs(mean=self.mean, cov=self.cov, size=size)
+        S0_samples = np.exp(theta_samples[:, 0])
+        D_samples = D_from_theta(theta_samples[:, 1:])
         evals_samples, evecs_samples = np.linalg.eigh(D_samples)
     
         return S0_samples, evals_samples, evecs_samples
@@ -646,7 +644,7 @@ def importance_sampling(n_samples, gamma_param, nu_param):
 
     # sampling with gamma and wishart distribution    
     S0_samples = gamma.rvs(a=1/gamma_param**2, scale=gamma_param**2*S0_init, size=n_samples)
-    D_samples = wishart.rvs(df=nu_param, scale=D_init, size=n_samples)
+    D_samples = wishart.rvs(df=nu_param, scale=D_init/nu_param, size=n_samples)
     
     evals_samples, evecs_samples = np.linalg.eigh(D_samples)
     prior_sample = prior.logpdf(S0_samples, evals_samples)
@@ -654,7 +652,7 @@ def importance_sampling(n_samples, gamma_param, nu_param):
     log_q_D = np.array([
         wishart.logpdf(D,
         df=nu_param,
-        scale=D_init)
+        scale=D_init/nu_param)
         for D in D_samples
     ])
 
@@ -665,7 +663,8 @@ def importance_sampling(n_samples, gamma_param, nu_param):
 
     importance_weights = prior_sample + likelihood_sample - log_q
     #normalization
-    importance_weights = importance_weights / np.sum(importance_weights)
+    importance_weights = importance_weights - logsumexp(importance_weights)
+    importance_weights = np.exp(importance_weights)
     print("N_ESS: ", 1/np.sum(importance_weights**2))
     return importance_weights, S0_samples, evals_samples, evecs_samples
 
@@ -768,7 +767,7 @@ def laplace_approximation():
     theta_hat = res.x
 
     # #Compute Hessian at theta_hat with central difference approximation
-    def hessian(f, x0, eps=1e-5):
+    def hessian(f, x0, h=1e-5):
         n = len(x0)
         hessian = np.zeros((n, n))
         f0 = f(x0)
@@ -778,21 +777,21 @@ def laplace_approximation():
                 if i == j:
                     dx = np.zeros(n)
                     # print(dx)
-                    dx[i] = eps
+                    dx[i] = h
                     # print(dx)
                     f_plus = f(x0 + dx)
                     f_minus = f(x0 - dx)
-                    hessian[i, j] = (f_plus - 2*f0 + f_minus) / (eps**2)
+                    hessian[i, j] = (f_plus - 2*f0 + f_minus) / (h**2)
                 else:
                     dxi = np.zeros(n)
                     dxj = np.zeros(n)
-                    dxi[i] = eps
-                    dxj[j] = eps
+                    dxi[i] = h
+                    dxj[j] = h
                     f_pp = f(x0 + dxi + dxj)
                     f_pm = f(x0 + dxi - dxj)
                     f_mp = f(x0 - dxi + dxj)
                     f_mm = f(x0 - dxi - dxj)
-                    hessian[i, j] = (f_pp - f_pm - f_mp + f_mm) / (4*eps**2)
+                    hessian[i, j] = (f_pp - f_pm - f_mp + f_mm) / (4*h**2)
                     hessian[j, i] = hessian[i, j]
 
         return hessian
@@ -838,7 +837,7 @@ def main():
     plot_mcmc_traces(S0_mh[burn_in:], evals_mh[burn_in:], n_samples-burn_in)
 
     # Run Importance Sampling and plot results
-    w_is, S0_is, evals_is, evecs_is = importance_sampling(n_samples, gamma_param=0.01, nu_param=25, force_recompute=False)
+    w_is, S0_is, evals_is, evecs_is = importance_sampling(n_samples, gamma_param=0.01, nu_param=500, force_recompute=False)
     plot_results(S0_is, evals_is, evecs_is, evec_principal, weights=w_is, method="is")
 
     # Run Variational Inference and plot results
