@@ -539,6 +539,17 @@ class mvn_reparameterized:
     
         return S0_samples, evals_samples, evecs_samples
 
+    def get_theta(self, size):
+        noise = np.random.randn(size, self.dim)
+        theta = self.mean + noise@self.L.T
+        return theta
+
+    def logpdf(self, theta):
+        return multivariate_normal.logpdf(
+        theta,
+        mean=self.mean,
+        cov=self.cov
+        )
 
 """
 =============================================================================
@@ -629,7 +640,7 @@ def metropolis_hastings(n_samples, S0_init, evals_init, evecs_init, prior, likel
 
 
 @disk_memoize()
-def importance_sampling(n_samples, gamma_param, nu_param):
+def importance_sampling(n_samples, gamma_param, nu_param, laplacian_proposal=False, iteration=False):
     # Students: implement Importance Sampling here.
     # Before starting, make sure the prior and likelihood are implemented.
     # Note: you may change, add, or remove input parameters depending on your design
@@ -642,31 +653,63 @@ def importance_sampling(n_samples, gamma_param, nu_param):
     prior = frozen_prior()
     likelihood = frozen_likelihood(gtab, y)
 
-    # sampling with gamma and wishart distribution    
-    S0_samples = gamma.rvs(a=1/gamma_param**2, scale=gamma_param**2*S0_init, size=n_samples)
-    D_samples = wishart.rvs(df=nu_param, scale=D_init/nu_param, size=n_samples)
+    if laplacian_proposal:
+        def log_posterior(theta):
+            print(theta.shape)
+            S0 = np.exp(theta[0])
+            D = D_from_theta(theta[1:])
+            evals, evecs = np.linalg.eigh(D)
+            log_prior = prior.logpdf(S0, evals[None, :])[0]
+            log_likelihood = likelihood.logpdf(S0, evecs, evals)
+            return log_prior + log_likelihood[0]
+
+        laplace = laplace_approximation()
+        theta_samples = laplace.get_theta(size=n_samples)
     
-    evals_samples, evecs_samples = np.linalg.eigh(D_samples)
-    prior_sample = prior.logpdf(S0_samples, evals_samples)
-    likelihood_sample = likelihood.logpdf(S0_samples, evecs_samples, evals_samples)
-    log_q_D = np.array([
-        wishart.logpdf(D,
-        df=nu_param,
-        scale=D_init/nu_param)
-        for D in D_samples
-    ])
+        prior_sample = np.zeros(n_samples)
+        likelihood_sample = np.zeros(n_samples)
 
-    log_q = (
-        gamma.logpdf(S0_samples, a=1/gamma_param**2, scale=gamma_param**2*S0_init)
-        + log_q_D
-    )
+        for i, theta in enumerate(theta_samples):
+            S0 = np.exp(theta[0])
+            D = D_from_theta(theta[1:])
+            evals, evecs = np.linalg.eigh(D)
+            prior_sample[i] = prior.logpdf(S0, evals[None, :])[0]
+            likelihood_sample[i] = likelihood.logpdf(S0, evecs, evals)[0]
 
-    importance_weights = prior_sample + likelihood_sample - log_q
-    #normalization
-    importance_weights = importance_weights - logsumexp(importance_weights)
-    importance_weights = np.exp(importance_weights)
-    print("N_ESS: ", 1/np.sum(importance_weights**2))
-    return importance_weights, S0_samples, evals_samples, evecs_samples
+        log_q = laplace.logpdf(theta_samples)
+        log_w = (
+            prior_sample
+            + likelihood_sample
+            - log_q
+        )
+
+        log_w -= logsumexp(log_w)
+
+        w = np.exp(log_w)
+        S0_samples = np.exp(theta_samples[:, 0])
+        D_samples = D_from_theta(theta_samples[:, 1:])
+        evals_samples, evecs_samples = np.linalg.eigh(D_samples)
+    else:
+        # sampling with gamma and wishart distribution    
+        S0_samples = gamma.rvs(a=1/(gamma_param**2), scale=(gamma_param**2)*S0_init, size=n_samples)
+        D_samples = wishart.rvs(df=nu_param, scale=D_init/nu_param, size=n_samples)
+        
+        evals_samples, evecs_samples = np.linalg.eigh(D_samples)
+        prior_sample = prior.logpdf(S0_samples, evals_samples)
+        likelihood_sample = likelihood.logpdf(S0_samples, evecs_samples, evals_samples)
+        log_q_D = np.array([
+            wishart.logpdf(D, df=nu_param, scale=D_init/nu_param)
+            for D in D_samples
+        ])
+        log_q_S0 = gamma.logpdf(S0_samples, a=1/(gamma_param**2), scale=(gamma_param**2)*S0_init)
+        log_q = log_q_S0 + log_q_D
+
+    log_w = prior_sample + likelihood_sample - log_q
+    log_w -= logsumexp(log_w)
+    w = np.exp(log_w)
+    ESS = 1 / np.sum(w**2)
+    print("N_ESS: ", 1/np.sum(w**2))
+    return w, S0_samples, evals_samples, evecs_samples
 
 
 @disk_memoize()
@@ -837,7 +880,8 @@ def main():
     plot_mcmc_traces(S0_mh[burn_in:], evals_mh[burn_in:], n_samples-burn_in)
 
     # Run Importance Sampling and plot results
-    w_is, S0_is, evals_is, evecs_is = importance_sampling(n_samples, gamma_param=0.01, nu_param=500, force_recompute=False)
+    w_is, S0_is, evals_is, evecs_is = importance_sampling(n_samples, gamma_param=0.01, nu_param=500, laplacian_proposal=True, force_recompute=True)
+    print("Importance Sampling", np.sum(w_is*S0_is), np.sum(w_is*(S0_is-np.sum(w_is*S0_is))**2))
     plot_results(S0_is, evals_is, evecs_is, evec_principal, weights=w_is, method="is")
 
     # Run Variational Inference and plot results
@@ -848,6 +892,7 @@ def main():
     # Run Laplace Approximation and plot results
     posterior_laplace = laplace_approximation(force_recompute=False)
     S0_laplace, evals_laplace, evecs_laplace = posterior_laplace.rvs(size=n_samples)
+    print("Laplace Approximation",np.mean(S0_laplace), np.var(S0_laplace))
     plot_results(S0_laplace, evals_laplace, evecs_laplace, evec_principal, method="laplace")
 
     print("Done.")
