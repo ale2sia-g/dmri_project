@@ -842,7 +842,12 @@ def main():
     plot_results(S0_is, evals_is, evecs_is, evec_principal, weights=w_is, method="is")
 
     # Run Variational Inference and plot results
-    posterior_vi = variational_inference(force_recompute=True)
+    posterior_vi = variational_inference(
+        max_iters=50000,
+        K=100,
+        learning_rate=1e-3,
+        force_recompute=True
+    )
     S0_vi, evals_vi, evecs_vi = posterior_vi.rvs(size=n_samples)
     plot_results(S0_vi, evals_vi, evecs_vi, evec_principal, method="vi")
 
