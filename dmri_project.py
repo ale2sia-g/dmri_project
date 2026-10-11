@@ -529,6 +529,8 @@ class mvn_reparameterized:
     def __init__(self, mean, cov):
         self.mean = mean
         self.cov = cov
+        self.dim = mean.shape[0]
+        self.L = np.linalg.cholesky(cov)
     
     def rvs(self, size):
         # Sample from multivariate normal using reparameterization trick
