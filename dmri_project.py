@@ -573,6 +573,7 @@ def eval_lik(lik_obj, S0, evecs, evals):
 @disk_memoize()
 def metropolis_hastings(n_samples, S0_init, evals_init, evecs_init, prior, likelihood, gamma_param, nu_param):
     # Initialize arrays to store the final decomposed samples
+    # Initialize arrays to store the final decomposed samples
     S0_samples = np.zeros(n_samples)
     evals_samples = np.zeros((n_samples, 3))
     evecs_samples = np.zeros((n_samples, 3, 3))
@@ -581,11 +582,16 @@ def metropolis_hastings(n_samples, S0_init, evals_init, evecs_init, prior, likel
     curr_evals = evals_init
     curr_evecs = evecs_init
     curr_D = compute_D(curr_evals, curr_evecs).squeeze()
-   
+    
     # Evaluate initial posteriors 
     curr_log_prior = eval_prior(prior, curr_S0, curr_evals)
     curr_log_lik = eval_lik(likelihood, curr_S0, curr_evecs, curr_evals)
     curr_log_post = curr_log_prior + curr_log_lik 
+
+    # Compute initial log-Jacobian: sum of log(|lambda_i - lambda_j|)
+    curr_log_jac = (np.log(np.abs(curr_evals[0] - curr_evals[1]) + 1e-15) +
+                    np.log(np.abs(curr_evals[1] - curr_evals[2]) + 1e-15) +
+                    np.log(np.abs(curr_evals[0] - curr_evals[2]) + 1e-15))
 
     accepted = 0
     shape_S0 = gamma_param**(-2)
@@ -604,10 +610,13 @@ def metropolis_hastings(n_samples, S0_init, evals_init, evecs_init, prior, likel
         prop_evals, prop_evecs = np.linalg.eigh(prop_D)
         
         prop_log_prior = eval_prior(prior, prop_S0, prop_evals)
-        
-            
         prop_log_lik = eval_lik(likelihood, prop_S0, prop_evecs, prop_evals)
         prop_log_post = prop_log_lik + prop_log_prior
+
+        # Compute proposed log-Jacobian
+        prop_log_jac = (np.log(np.abs(prop_evals[0] - prop_evals[1]) + 1e-15) +
+                        np.log(np.abs(prop_evals[1] - prop_evals[2]) + 1e-15) +
+                        np.log(np.abs(prop_evals[0] - prop_evals[2]) + 1e-15))
         
         # Compute proposal densities for forward and backward moves
         log_q_fwd = (gamma.logpdf(prop_S0, a=shape_S0, scale=scale_S0_fwd) + 
@@ -619,19 +628,18 @@ def metropolis_hastings(n_samples, S0_init, evals_init, evecs_init, prior, likel
         log_q_bwd = (gamma.logpdf(curr_S0, a=shape_S0, scale=scale_S0_bwd) + 
                      wishart.logpdf(curr_D, df=nu_param, scale=scale_D_bwd))
         
-        log_alpha = (prop_log_post - curr_log_post) + (log_q_bwd - log_q_fwd)
+        # Include (curr_log_jac - prop_log_jac) in log_alpha
+        log_alpha = (prop_log_post - curr_log_post) + (log_q_bwd - log_q_fwd) + (curr_log_jac - prop_log_jac)
         
-
-       
         if np.log(np.random.rand()) < log_alpha:
             curr_S0 = prop_S0
             curr_D = prop_D
             curr_evals = prop_evals  
             curr_evecs = prop_evecs
             curr_log_post = prop_log_post
+            curr_log_jac = prop_log_jac   # Update curr_log_jac on accept
             accepted += 1
             
-      
         S0_samples[i] = curr_S0
         evals_samples[i] = curr_evals
         evecs_samples[i] = curr_evecs
@@ -876,10 +884,11 @@ def main():
     n_samples = 10000
 
     # Run Metropolis–Hastings and plot results
-    S0_mh, evals_mh, evecs_mh = metropolis_hastings(n_samples, S0_init, evals_init[::-1],evecs_init[:, ::-1], frozen_prior_instance, frozen_likelihood_instance, gamma_param=0.005, nu_param=2000.0, force_recompute=True)
-    burn_in = 1000
+    mh_samples = 50000
+    S0_mh, evals_mh, evecs_mh = metropolis_hastings(mh_samples, S0_init, evals_init[::-1],evecs_init[:, ::-1], frozen_prior_instance, frozen_likelihood_instance, gamma_param=0.005, nu_param=2000.0, force_recompute=True)
+    burn_in = 500
     plot_results(S0_mh[burn_in:], evals_mh[burn_in:], evecs_mh[burn_in:, :, :], evec_principal, method="mh")
-    plot_mcmc_traces(S0_mh[burn_in:], evals_mh[burn_in:], n_samples-burn_in)
+    plot_mcmc_traces(S0_mh[burn_in:], evals_mh[burn_in:],mh_samples-burn_in)
 
     # Run Importance Sampling and plot results
     w_is, S0_is, evals_is, evecs_is = importance_sampling(n_samples, gamma_param=0.01, nu_param=500, laplacian_proposal=True, force_recompute=True)
@@ -916,7 +925,7 @@ def plot_mcmc_traces(S0_samples, evals_samples, n_samples):
     axes[0].set_title('MCMC Trace Plot')
     
     # Trace for Principal Eigenvalue (Lambda 1)
-    axes[1].plot(iterations, evals_samples[:, 0], color='red', alpha=0.7)
+    axes[1].plot(iterations, evals_samples[:, 2], color='red', alpha=0.7)
     axes[1].set_ylabel(r'$\lambda_1$')
     
     # Trace for Secondary Eigenvalue (Lambda 2)
@@ -924,7 +933,7 @@ def plot_mcmc_traces(S0_samples, evals_samples, n_samples):
     axes[2].set_ylabel(r'$\lambda_2$')
     
     # Trace for Tertiary Eigenvalue (Lambda 3)
-    axes[3].plot(iterations, evals_samples[:, 2], color='blue', alpha=0.7)
+    axes[3].plot(iterations, evals_samples[:, 0], color='blue', alpha=0.7)
     axes[3].set_ylabel(r'$\lambda_3$')
     axes[3].set_xlabel('Iteration')
     
