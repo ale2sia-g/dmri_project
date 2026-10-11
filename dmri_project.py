@@ -906,7 +906,7 @@ def main():
     plot_results(S0_vi, evals_vi, evecs_vi, evec_principal, method="vi")
 
     # Run Laplace Approximation and plot results
-    posterior_laplace = laplace_approximation(force_recompute=False)
+    posterior_laplace = laplace_approximation(force_recompute=True)
     S0_laplace, evals_laplace, evecs_laplace = posterior_laplace.rvs(size=n_samples)
     print("Laplace Approximation",np.mean(S0_laplace), np.var(S0_laplace))
     plot_results(S0_laplace, evals_laplace, evecs_laplace, evec_principal, method="laplace")
